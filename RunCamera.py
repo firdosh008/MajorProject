@@ -33,7 +33,6 @@ class Button(QPushButton):
         global vidpath
         m = e.mimeData()
         if m.hasUrls():
-            # self.parent().label.setPixmap(QPixmap(m.urls()[0].toLocalFile()))
             self.parent().loadVideo(m.urls()[0].toLocalFile())
             vidpath = m.urls()[0].toLocalFile()
             print(m.urls()[0].toLocalFile())
@@ -46,14 +45,6 @@ class Client(QWidget):
         self.setWindowTitle('Video Processor')
         self.setGeometry(350, 90, 629, 597)
         self.setFixedSize(615, 419)
-
-        # Processing indicator
-        self.processing_lable = self.make_lable('Processing....', 0, 0, 40, 40, True, 12)
-        self.processing_lable.setVisible(False)
-        self.gif = QMovie('UI/loading.gif')
-        self.gif.setScaledSize(QSize().scaled(40, 40, Qt.KeepAspectRatio))
-        self.processing_lable.setMovie(self.gif)
-        self.gif.start()
 
         # Video controls
         self.select_vid = Button("", self)
@@ -92,15 +83,12 @@ class Client(QWidget):
         if vidpath=='':
             return
 
-        self.processing_lable.setVisible(True)
-
         video_id = vidpath.split('.')[0]
         video_id = video_id.split('/')
         video_id = int(video_id[-1])
         print("hello")
-        CameraNode(video_id, 'videos/' + str(video_id) + '.mp4',files=Work_Detect_Files, city= random.choice(cities), district_no= 'District ' + str(random.randint(1, 30))).start()
+        CameraNode(video_id, 'videos/' + str(video_id) + '.mp4', files=Work_Detect_Files, city=random.choice(cities), district_no='District ' + str(random.randint(1, 30))).start()
         self.playVideo()
-
 
     def playVideo(self):
         global vidpath
@@ -110,14 +98,13 @@ class Client(QWidget):
 
         cap = cv2.VideoCapture(vidpath)
 
-        if (cap.isOpened() == False):
-            print("Error opening video  file")
+        if not cap.isOpened():
+            print("Error opening video file")
 
-        while (cap.isOpened()):
+        while cap.isOpened():
             ret, frame = cap.read()
-            if ret == True:
+            if ret:
                 cv2.imshow('Frame', frame)
-
                 if cv2.waitKey(25) & 0xFF == ord('q'):
                     break
             else:
@@ -126,18 +113,17 @@ class Client(QWidget):
         cap.release()
         cv2.destroyAllWindows()
 
-
     def getfiles(self):
         global vidpath
 
-        fileName, _ = QFileDialog.getOpenFileName(self, 'Single File', 'C:\'', '*.mp4 *.mkv *.avi')
+        fileName, _ = QFileDialog.getOpenFileName(self, 'Single File', 'C:\\', '*.mp4 *.mkv *.avi')
 
         if fileName=='':
             return
 
         self.loadVideo(path=fileName)
         vidpath = fileName
-        print(vidpath,'vid')
+        print(vidpath, 'vid')
         print(fileName)
 
     def loadVideo(self, path='h.mp4'):
@@ -148,8 +134,6 @@ class Client(QWidget):
 
         button = cv2.imread('UI/Play-Button-PNG-Picture.png')
         button = cv2.resize(button, (111, 111), interpolation=cv2.INTER_AREA)
-        print(button.shape)
-        print(img.shape)
 
         height_needed = 241 - button.shape[0]
         width_needed = 351 - button.shape[1]
@@ -162,30 +146,9 @@ class Client(QWidget):
         border = cv2.copyMakeBorder(button, top=top, bottom=bottom, left=left, right=right, borderType=cv2.BORDER_CONSTANT, value=0)
         border = np.where(border < 150, img, border)
 
-
         border = cv2.resize(border, (559, 300), interpolation=cv2.INTER_AREA)
         cv2.imwrite('UI/tempToLoad.png', border)
-        # self.select_vid.setVisible(False)
-        # play_vid = QPushButton(self)
-        # self.play_vid.setText('')
-        # self.play_vid.move(140, 20)
-        # self.play_vid.resize(351, 241)
         self.play_vid.setStyleSheet("background-image : url(UI/tempToLoad.png);")
-        # self.play_vid.clicked.connect(self.playVideo)
-        # self.play_vid.setVisible(True)
-
-    def make_lable(self, text, x, y, width, height, bold=False, font=12):
-        label = QLabel(self)
-        label.setText(text)
-        label.move(x, y)
-        label.resize(width, height)
-        font = QFont('SansSerif', font)
-        if bold:
-            font.setBold(True)
-        label.setFont(font)
-        return label
-
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
