@@ -1,0 +1,15 @@
+joblib
+numpy==1.17.4
+opencv-python
+Pillow
+PyQt5
+PyQt5-sip
+pyzmq
+scikit-learn==0.22.2.post1
+scipy
+threadpoolctl
+matplotlib
+pygame
+torch
+twilio==7.17.0
+python-dotenv==0.19.0  # Added for environment variable management
