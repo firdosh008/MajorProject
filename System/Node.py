@@ -3,7 +3,6 @@ import threading
 # Using enum class create enumerations
 from System.Connections.ReceiverController import ReceiverController
 from System.Data.CONSTANTS import Work_Detect_Files
-from System.Database.DatabaseThread import DatabaseThread
 from System.NodeType import NodeType
 
 
@@ -17,7 +16,6 @@ class Node(threading.Thread):
 
     def run(self):
         if self.node_type == NodeType.Master:
-            DatabaseThread().start()
             ReceiverController(self.port,type = NodeType.Master).run()
             pass
         elif self.node_type == NodeType.Detetion:

@@ -2,12 +2,30 @@ import os
 from dotenv import load_dotenv
 import subprocess
 import time
+import signal
+import sys
 
 # Load environment variables from .env file
 load_dotenv()
 
 def run_command(command):
     return subprocess.Popen(command, shell=True)
+
+# Define cleanup handler for graceful shutdown
+def cleanup_handler(signum, frame):
+    print("\nShutting down services...")
+    for process in backend_processes + client_processes:
+        try:
+            process.terminate()
+            process.wait(timeout=2)
+        except:
+            process.kill()
+    print("All processes terminated")
+    sys.exit(0)
+
+# Register signal handlers for graceful termination
+signal.signal(signal.SIGINT, cleanup_handler)
+signal.signal(signal.SIGTERM, cleanup_handler)
 
 # Run backend services
 backend_services = [
@@ -17,37 +35,31 @@ backend_services = [
     "python RunCrash.py"
 ]
 
-# Run client services
+# Run client services (just process video files, no streaming)
 client_services = [
     "python RunCamera.py"
 ]
 
-# Start backend services
+print("Starting backend services...")
 backend_processes = [run_command(service) for service in backend_services]
 
 # Wait a bit for backend services to initialize
 time.sleep(5)
+print("Backend services started")
 
-# Start client services
+print("Starting client services...")
 client_processes = [run_command(service) for service in client_services]
+print("Client services started")
 
-# Wait for all processes to complete
-for process in backend_processes + client_processes:
-    process.wait()
+print("Argus system is running. Press Ctrl+C to stop.")
 
-from Debug import MainFlow
+# Wait for all processes to complete or user interruption
+try:
+    while all(process.poll() is None for process in backend_processes + client_processes):
+        time.sleep(1)
+except KeyboardInterrupt:
+    cleanup_handler(None, None)
 
-def run_argus():
-    # Your existing code here
-    
-    # After all processes are complete
-    main_flow = MainFlow()
-    main_flow.run("path/to/your/video.mp4")
-    main_flow.calculate_metrics()
-
-if __name__ == "__main__":
-    run_argus()
-    
-    
-    
-    # 1518, 1521, 1552, 1566
+# If we get here, some process has exited
+print("Some process has exited. Shutting down all services...")
+cleanup_handler(None, None)

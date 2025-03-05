@@ -1,33 +1,41 @@
 import os
-
 import cv2
 from datetime import datetime
+import json
 
 from System.Controller.JsonEncoder import JsonEncoder
 from System.Data.CONSTANTS import *
-from System.Database.DatabaseConnection import DatabaseConnection
 from System.Notifications.twilio_handler import TwilioHandler
 
 
 class Master:
     def __init__(self):
-        self.database = DatabaseConnection()
+        # Replace database with in-memory storage
         self.twilio_handler = TwilioHandler()
+        self.crash_records = []
+        self.saved_frames = {}  # camera_id -> {frame_id -> frames}
+        
+        # Create directory for saved videos if it doesn't exist
+        if not os.path.exists('saved_crash_vid'):
+            os.makedirs('saved_crash_vid')
+        if not os.path.exists('saved_frames_vid'):
+            os.makedirs('saved_frames_vid')
 
+    def saveFrames(self, camera_id, starting_frame_id, frames, frame_width, frame_height):
+        self.write(camera_id, frames, starting_frame_id, frame_width, frame_height, False)
+        
+        # Store frame info in memory instead of database
+        if camera_id not in self.saved_frames:
+            self.saved_frames[camera_id] = {}
+        self.saved_frames[camera_id][starting_frame_id] = True
 
-    def saveFrames(self,camera_id,starting_frame_id,frames,frame_width,frame_height):
-        self.write(camera_id,frames,starting_frame_id,frame_width,frame_height,False)
-        self.database.insertSavedFramesVid(camera_id,starting_frame_id)
-
-
-
-    def write(self,camera_id,frames,starting_frame_id,frame_width,frame_height,is_crash = False ):
+    def write(self, camera_id, frames, starting_frame_id, frame_width, frame_height, is_crash=False):
         if is_crash:
             folder = "saved_crash_vid"
         else:
             folder = "saved_frames_vid"
 
-        file_path = './'+folder+'/' +"(" + str(camera_id) + ") " + str(starting_frame_id) + '.avi'
+        file_path = './' + folder + '/' + "(" + str(camera_id) + ") " + str(starting_frame_id) + '.avi'
         if (not os.path.exists(folder)):
             os.makedirs(folder)
         out = cv2.VideoWriter(file_path, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 30, (frame_width, frame_height))
@@ -35,15 +43,15 @@ class Master:
         size = len(frames)
         for i in range(size):
             out.write(frames[i])
-        print("camera_id_"+str(camera_id)+"_" + str(starting_frame_id) + folder+" saved!" + str(size))
+        print("camera_id_" + str(camera_id) + "_" + str(starting_frame_id) + folder + " saved!" + str(size))
         out.release()
 
-    def getVideoFrames(self,camera_id,frame_id,is_crash = False):
+    def getVideoFrames(self, camera_id, frame_id, is_crash=False):
         folder = "saved_frames_vid"
         if is_crash:
             folder = "saved_crash_vid"
 
-        file_path = './'+folder+'/' + "(" + str(camera_id) + ") " + str(frame_id) + '.avi'
+        file_path = './' + folder + '/' + "(" + str(camera_id) + ") " + str(frame_id) + '.avi'
         cap = cv2.VideoCapture(file_path)
 
         frames = []
@@ -55,10 +63,7 @@ class Master:
             frames.append(frame)
         return frames
 
-
-
-    def recordCrash(self,camera_id,starting_frame_id,crash_dimensions):
-
+    def recordCrash(self, camera_id, starting_frame_id, crash_dimensions):
         new_frames = []
         from_no_of_times = PRE_FRAMES_NO
 
@@ -66,59 +71,81 @@ class Master:
             last_frames = from_no_of_times * 30
             new_frames_id = starting_frame_id - last_frames
             if new_frames_id > 0:
-                new_frames.extend(self.getVideoFrames(camera_id,new_frames_id,False))
+                new_frames.extend(self.getVideoFrames(camera_id, new_frames_id, False))
                 frame_width = len(new_frames[0][0])
                 frame_height = len(new_frames[0])
 
-            from_no_of_times -=1
-
+            from_no_of_times -= 1
 
         xmin = crash_dimensions[0]
         ymin = crash_dimensions[1]
         xmax = crash_dimensions[2]
         ymax = crash_dimensions[3]
-        #
-        # if len(new_frames) >= 90:
-        #     for i in range(len(new_frames) - 90, len(new_frames) - 60, 8):
-        #         fill = -1
-        #         cv2.rectangle(new_frames[i], (xmin, ymin), (xmax, ymax), (0, 0, 255), fill)
-        #         cv2.putText(new_frames[i], "Crash!", (12, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 4)
+
         if len(new_frames) > 60:
             no_of_frames = 3
         elif len(new_frames) > 30:
             no_of_frames = 2
         else:
-            no_of_frames =1
+            no_of_frames = 1
 
         if len(new_frames) >= 60:
-            for i in range(len(new_frames)-60, len(new_frames)-30,6):
+            for i in range(len(new_frames) - 60, len(new_frames) - 30, 6):
                 fill = -1
                 cv2.rectangle(new_frames[i], (xmin, ymin), (xmax, ymax), (0, 0, 255), fill)
-                # cv2.rectangle(new_frames[i], (xmin, ymin), (xmax, ymax), (0, 0, 255), 1)
-
                 cv2.putText(new_frames[i], "Crash!", (12, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 4)
             no_of_frames = 3
-        for i in range(len(new_frames)-30,len(new_frames),1):
-            if i %2 == 0:
+            
+        for i in range(len(new_frames) - 30, len(new_frames), 1):
+            if i % 2 == 0:
                 fill = -1
             else:
                 fill = 2
-            cv2.rectangle(new_frames[i], (xmin,ymin), (xmax,ymax), (0,0,255),fill)
-            # cv2.rectangle(new_frames[i], (xmin,ymin), (xmax,ymax), (0,0,255),1)
-
-            cv2.putText(new_frames[i], "Crash!", (12,  40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,0,255), 4)
+            cv2.rectangle(new_frames[i], (xmin, ymin), (xmax, ymax), (0, 0, 255), fill)
+            cv2.putText(new_frames[i], "Crash!", (12, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 4)
 
         self.write(camera_id, new_frames, starting_frame_id, frame_width, frame_height, True)
         return no_of_frames
 
-    def checkResult(self,camera_id,starting_frame_id,crash_dimentions,city,district_no):
-        #print(city,district_no)
+    def checkResult(self, camera_id, starting_frame_id, crash_dimentions, city, district_no):
         if len(crash_dimentions) == 0:
             return
         print("Sending Crash Has occured...")
-        no_of_from_no = self.recordCrash(camera_id,starting_frame_id,crash_dimentions)
-        self.database.insertCrashFramesVid(camera_id,starting_frame_id,PRE_FRAMES_NO+1,city,district_no)
-        self.sendNotification(camera_id,starting_frame_id,city,district_no)
+        no_of_from_no = self.recordCrash(camera_id, starting_frame_id, crash_dimentions)
+        
+        # Store crash record in memory instead of database
+        crash_time = datetime.utcnow()
+        crash_record = {
+            'camera_id': camera_id,
+            'frame_id': starting_frame_id,
+            'from_no': PRE_FRAMES_NO + 1,
+            'city': city,
+            'district': district_no,
+            'crash_time': crash_time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        self.crash_records.append(crash_record)
+        
+        # Save crash records to a JSON file for persistence
+        self._save_crash_records()
+        
+        self.sendNotification(camera_id, starting_frame_id, city, district_no)
+
+    def _save_crash_records(self):
+        """Save crash records to a JSON file instead of database"""
+        try:
+            with open('crash_records.json', 'w') as f:
+                json.dump(self.crash_records, f, indent=2)
+        except Exception as e:
+            print(f"Error saving crash records: {e}")
+            
+    def _load_crash_records(self):
+        """Load crash records from JSON file"""
+        try:
+            if os.path.exists('crash_records.json'):
+                with open('crash_records.json', 'r') as f:
+                    self.crash_records = json.load(f)
+        except Exception as e:
+            print(f"Error loading crash records: {e}")
 
     def sendNotification(self, camera_id, starting_frame_id, city, district_no):
         jsonEncoder = JsonEncoder()
@@ -144,63 +171,85 @@ class Master:
         jsonEncoder.sendNotification(camera_id, starting_frame_id, city, district_no, date, crash_pic)
 
     def executeQuery(self, start_date, end_date, start_time, end_time, city, district):
-        dic_of_query = {}
-        start_date_array = start_date.split("/")
+        # Load crash records if not already loaded
+        if not self.crash_records:
+            self._load_crash_records()
+            
+        # Filter crash records based on query parameters
+        filtered_records = []
+        
+        # Parse date and time for comparison
+        start_datetime_str = self._format_datetime(start_date, start_time)
+        end_datetime_str = self._format_datetime(end_date, end_time)
+        
+        for record in self.crash_records:
+            # Skip if city doesn't match
+            if city and record['city'] != city:
+                continue
+                
+            # Skip if district doesn't match
+            if district and record['district'] != district:
+                continue
+                
+            # Check if crash_time is in the requested range
+            if start_datetime_str and end_datetime_str:
+                if not (start_datetime_str <= record['crash_time'] <= end_datetime_str):
+                    continue
+                    
+            filtered_records.append(record)
+            
+        # Sort by crash_time (newest first)
+        filtered_records.sort(key=lambda x: x['crash_time'], reverse=True)
+        
+        self.replyQuery(filtered_records)
+        
+    def _format_datetime(self, date_str, time_str):
+        """Format date and time strings to standard format for comparison"""
+        try:
+            if not date_str or not time_str:
+                return None
+                
+            date_parts = date_str.split('/')
+            if len(date_parts) != 3:
+                return None
+                
+            day, month, year = date_parts
+            
+            # Pad with leading zeros
+            if len(day) < 2:
+                day = f"0{day}"
+            if len(month) < 2:
+                month = f"0{month}"
+                
+            time_parts = time_str.split(':')
+            if len(time_parts) < 2:
+                return None
+                
+            hour, minute = time_parts
+            
+            # Pad with leading zeros
+            if len(hour) < 2:
+                hour = f"0{hour}"
+            if len(minute) < 2:
+                minute = f"0{minute}"
+                
+            return f"{year}-{month}-{day} {hour}:{minute}:00"
+        except Exception:
+            return None
 
-        if len(start_date_array[0]) < 2:
-            start_date_array[0] = "0"+start_date_array[0]
-        if len(start_date_array[1]) < 2:
-            start_date_array[1] = "0" + start_date_array[1]
-
-        start_date = start_date_array[2] +"-"+start_date_array[1]+"-"+start_date_array[0]
-
-        end_date_array = end_date.split("/")
-
-        if len(end_date_array[0]) < 2:
-            end_date_array[0] = "0"+end_date_array[0]
-        if len(end_date_array[1]) < 2:
-            end_date_array[1] = "0" + end_date_array[1]
-
-        end_date = end_date_array[2] + "-" + end_date_array[1] + "-" + end_date_array[0]
-
-        start_time_array = start_time.split(":")
-        if len(start_time_array[0]) < 2:
-            start_time_array[0] = "0"+start_time_array[0]
-        if len(start_time_array[1]) < 2:
-            start_time_array[1] = "0" + start_time_array[1]
-
-        end_time_array = end_time.split(":")
-        if len(end_time_array[0]) < 2:
-            end_time_array[0] = "0"+end_time_array[0]
-        if len(end_time_array[1]) < 2:
-            end_time_array[1] = "0" + end_time_array[1]
-        start_time +=":00"
-        end_time += ":00"
-        dic_of_query[START_DATE] = start_date
-        dic_of_query[END_DATE] = end_date
-        dic_of_query[START_TIME] = start_time
-        dic_of_query[END_TIME] = end_time
-
-        if city != None :
-            dic_of_query[CITY] = city
-        if district != None:
-            dic_of_query[DISTRICT] = district
-
-        results = self.database.selectCrashFramesList(dic_of_query)
-        self.replyQuery(results)
-
-    def replyQuery(self,results):
-        list = []
+    def replyQuery(self, results):
+        """Process crash records and send to GUI"""
+        list_results = []
         duplicates = {}
+        
         for crash in results:
+            camera_id = crash['camera_id']
+            frame_id = crash['frame_id']
+            city = crash['city']
+            district = crash['district']
+            crash_time = crash['crash_time']
 
-            camera_id = crash[0]
-            frame_id = crash[1]
-            city = crash[2]
-            district = crash[3]
-            crash_time = crash[4]
-
-            if camera_id in duplicates: #not use it
+            if camera_id in duplicates:  # not use it
                 continue
 
             crash_pic = self.getCrashPhoto(camera_id, frame_id)
@@ -212,36 +261,42 @@ class Master:
                 CRASH_TIME: crash_time,
                 CRASH_PIC: crash_pic
             }
-            list.append(sending_msg)
+            list_results.append(sending_msg)
 
         jsonEncoder = JsonEncoder()
-        jsonEncoder.replyQuery(list)
+        jsonEncoder.replyQuery(list_results)
 
-    def getCrashPhoto(self,camera_id,starting_frame_id):
+    def getCrashPhoto(self, camera_id, starting_frame_id):
         folder = "saved_crash_vid"
 
-        file_path = './'+folder+'/' + "(" + str(camera_id) + ") " + str(starting_frame_id) + '.avi'
+        file_path = './' + folder + '/' + "(" + str(camera_id) + ") " + str(starting_frame_id) + '.avi'
         cap = cv2.VideoCapture(file_path)
-        if cap == None:
+        if cap is None or not cap.isOpened():
             return None
 
-        total_frames = cap.get(7) # 7 = CV_CAP_PROP_FRAME_COUNT
-        frame_no = 89
-        if total_frames <90:
-            frame_no = total_frames
-        cap.set(1, frame_no) # 1 = CV_CAP_PROP_POS_FRAMES
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        frame_no = min(89, total_frames - 1)
+        if frame_no < 0:
+            return None
+            
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
         ret, photo = cap.read()
-        return photo
+        return photo if ret else None
 
-    def sendVideoToGUI(self,camera_id,starting_frame_id):
-        video_frames = self.getVideoFrames(camera_id,starting_frame_id,True)
+    def sendVideoToGUI(self, camera_id, starting_frame_id):
+        video_frames = self.getVideoFrames(camera_id, starting_frame_id, True)
         jsonEncoder = JsonEncoder()
         jsonEncoder.replyVideo(video_frames)
 
     def sendRecentCrashesToGUI(self):
-        results = self.database.selectCrashFramesLast10()
-        self.replyQuery(results)
-
-
-
-
+        # Load crash records if not already loaded
+        if not self.crash_records:
+            self._load_crash_records()
+            
+        # Sort by crash_time (newest first)
+        recent_crashes = sorted(self.crash_records, key=lambda x: x['crash_time'], reverse=True)
+        
+        # Limit to 10 most recent
+        recent_crashes = recent_crashes[:10]
+        
+        self.replyQuery(recent_crashes)
