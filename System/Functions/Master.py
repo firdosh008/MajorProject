@@ -22,38 +22,35 @@ class Master:
             os.makedirs('saved_frames_vid')
 
     def saveFrames(self, camera_id, starting_frame_id, frames, frame_width, frame_height):
+        """Store frames in file system"""
         self.write(camera_id, frames, starting_frame_id, frame_width, frame_height, False)
         
-        # Store frame info in memory instead of database
+        # Store frame info in memory
         if camera_id not in self.saved_frames:
             self.saved_frames[camera_id] = {}
         self.saved_frames[camera_id][starting_frame_id] = True
 
     def write(self, camera_id, frames, starting_frame_id, frame_width, frame_height, is_crash=False):
-        if is_crash:
-            folder = "saved_crash_vid"
-        else:
-            folder = "saved_frames_vid"
+        """Write frames to video file"""
+        folder = "saved_crash_vid" if is_crash else "saved_frames_vid"
 
-        file_path = './' + folder + '/' + "(" + str(camera_id) + ") " + str(starting_frame_id) + '.avi'
-        if (not os.path.exists(folder)):
+        file_path = f'./{folder}/({camera_id}) {starting_frame_id}.avi'
+        if not os.path.exists(folder):
             os.makedirs(folder)
+            
         out = cv2.VideoWriter(file_path, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 30, (frame_width, frame_height))
 
-        size = len(frames)
-        for i in range(size):
-            out.write(frames[i])
-        print("camera_id_" + str(camera_id) + "_" + str(starting_frame_id) + folder + " saved!" + str(size))
+        for frame in frames:
+            out.write(frame)
+            
         out.release()
 
     def getVideoFrames(self, camera_id, frame_id, is_crash=False):
-        folder = "saved_frames_vid"
-        if is_crash:
-            folder = "saved_crash_vid"
-
-        file_path = './' + folder + '/' + "(" + str(camera_id) + ") " + str(frame_id) + '.avi'
+        """Retrieve frames from video file"""
+        folder = "saved_crash_vid" if is_crash else "saved_frames_vid"
+        file_path = f'./{folder}/({camera_id}) {frame_id}.avi'
+        
         cap = cv2.VideoCapture(file_path)
-
         frames = []
 
         while True:
@@ -61,12 +58,16 @@ class Master:
             if not ret:
                 break
             frames.append(frame)
+            
+        cap.release()
         return frames
 
     def recordCrash(self, camera_id, starting_frame_id, crash_dimensions):
+        """Record crash event with visual marking"""
         new_frames = []
         from_no_of_times = PRE_FRAMES_NO
 
+        # Collect frames from previous segments
         while from_no_of_times >= 0:
             last_frames = from_no_of_times * 30
             new_frames_id = starting_frame_id - last_frames
@@ -77,11 +78,10 @@ class Master:
 
             from_no_of_times -= 1
 
-        xmin = crash_dimensions[0]
-        ymin = crash_dimensions[1]
-        xmax = crash_dimensions[2]
-        ymax = crash_dimensions[3]
+        # Unpack crash dimensions
+        xmin, ymin, xmax, ymax = crash_dimensions
 
+        # Determine how many frames to mark
         if len(new_frames) > 60:
             no_of_frames = 3
         elif len(new_frames) > 30:
@@ -89,31 +89,31 @@ class Master:
         else:
             no_of_frames = 1
 
+        # Mark crash in earlier frames
         if len(new_frames) >= 60:
             for i in range(len(new_frames) - 60, len(new_frames) - 30, 6):
-                fill = -1
-                cv2.rectangle(new_frames[i], (xmin, ymin), (xmax, ymax), (0, 0, 255), fill)
+                cv2.rectangle(new_frames[i], (xmin, ymin), (xmax, ymax), (0, 0, 255), -1)
                 cv2.putText(new_frames[i], "Crash!", (12, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 4)
             no_of_frames = 3
             
+        # Mark crash in recent frames
         for i in range(len(new_frames) - 30, len(new_frames), 1):
-            if i % 2 == 0:
-                fill = -1
-            else:
-                fill = 2
+            fill = -1 if i % 2 == 0 else 2
             cv2.rectangle(new_frames[i], (xmin, ymin), (xmax, ymax), (0, 0, 255), fill)
             cv2.putText(new_frames[i], "Crash!", (12, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 4)
 
+        # Save crash video
         self.write(camera_id, new_frames, starting_frame_id, frame_width, frame_height, True)
         return no_of_frames
 
     def checkResult(self, camera_id, starting_frame_id, crash_dimentions, city, district_no):
+        """Process crash detection results"""
         if len(crash_dimentions) == 0:
             return
-        print("Sending Crash Has occured...")
+            
         no_of_from_no = self.recordCrash(camera_id, starting_frame_id, crash_dimentions)
         
-        # Store crash record in memory instead of database
+        # Store crash record in memory
         crash_time = datetime.utcnow()
         crash_record = {
             'camera_id': camera_id,
@@ -125,13 +125,14 @@ class Master:
         }
         self.crash_records.append(crash_record)
         
-        # Save crash records to a JSON file for persistence
+        # Save crash records for persistence
         self._save_crash_records()
         
+        # Send notification
         self.sendNotification(camera_id, starting_frame_id, city, district_no)
 
     def _save_crash_records(self):
-        """Save crash records to a JSON file instead of database"""
+        """Save crash records to a JSON file"""
         try:
             with open('crash_records.json', 'w') as f:
                 json.dump(self.crash_records, f, indent=2)
@@ -148,10 +149,9 @@ class Master:
             print(f"Error loading crash records: {e}")
 
     def sendNotification(self, camera_id, starting_frame_id, city, district_no):
+        """Send notification about crash event"""
         jsonEncoder = JsonEncoder()
-        time = str(datetime.utcnow().time()).split(".")[0]
-        date = str(datetime.utcnow().date())
-        date = date + " " + time
+        date = f"{datetime.utcnow().date()} {str(datetime.utcnow().time()).split('.')[0]}"
         
         try:
             crash_pic = self.getCrashPhoto(camera_id, starting_frame_id)
@@ -167,21 +167,21 @@ class Master:
             crash_pic=crash_pic
         )
         
-        # Send original notification
+        # Send notification to GUI
         jsonEncoder.sendNotification(camera_id, starting_frame_id, city, district_no, date, crash_pic)
 
     def executeQuery(self, start_date, end_date, start_time, end_time, city, district):
+        """Search crash records based on query parameters"""
         # Load crash records if not already loaded
         if not self.crash_records:
             self._load_crash_records()
             
-        # Filter crash records based on query parameters
-        filtered_records = []
-        
         # Parse date and time for comparison
         start_datetime_str = self._format_datetime(start_date, start_time)
         end_datetime_str = self._format_datetime(end_date, end_time)
         
+        # Filter crash records
+        filtered_records = []
         for record in self.crash_records:
             # Skip if city doesn't match
             if city and record['city'] != city:
@@ -240,7 +240,6 @@ class Master:
     def replyQuery(self, results):
         """Process crash records and send to GUI"""
         list_results = []
-        duplicates = {}
         
         for crash in results:
             camera_id = crash['camera_id']
@@ -248,9 +247,6 @@ class Master:
             city = crash['city']
             district = crash['district']
             crash_time = crash['crash_time']
-
-            if camera_id in duplicates:  # not use it
-                continue
 
             crash_pic = self.getCrashPhoto(camera_id, frame_id)
             sending_msg = {
@@ -267,10 +263,10 @@ class Master:
         jsonEncoder.replyQuery(list_results)
 
     def getCrashPhoto(self, camera_id, starting_frame_id):
-        folder = "saved_crash_vid"
-
-        file_path = './' + folder + '/' + "(" + str(camera_id) + ") " + str(starting_frame_id) + '.avi'
+        """Extract a frame from crash video for thumbnail"""
+        file_path = f'./saved_crash_vid/({camera_id}) {starting_frame_id}.avi'
         cap = cv2.VideoCapture(file_path)
+        
         if cap is None or not cap.isOpened():
             return None
 
@@ -281,14 +277,17 @@ class Master:
             
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
         ret, photo = cap.read()
+        cap.release()
         return photo if ret else None
 
     def sendVideoToGUI(self, camera_id, starting_frame_id):
+        """Send video frames to GUI for playback"""
         video_frames = self.getVideoFrames(camera_id, starting_frame_id, True)
         jsonEncoder = JsonEncoder()
         jsonEncoder.replyVideo(video_frames)
 
     def sendRecentCrashesToGUI(self):
+        """Send recent crashes to GUI"""
         # Load crash records if not already loaded
         if not self.crash_records:
             self._load_crash_records()
